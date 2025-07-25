@@ -3,4 +3,3 @@ uvicorn
 transformers
 sentencepiece
 torch
-sentencepiece
