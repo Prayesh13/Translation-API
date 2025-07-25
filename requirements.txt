@@ -2,5 +2,4 @@ fastapi
 uvicorn
 transformers
 torch
-gradio
 sentencepiece
