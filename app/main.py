@@ -1,42 +1,62 @@
-# Import necessary libraries
-from fastapi import FastAPI, HTTPException
-
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
-
-from transformers import MarianMTModel, MarianTokenizer
-from typing import List
-from fastapi.responses import JSONResponse
+import gradio as gr
+import requests
+import threading
 import uvicorn
 
-# Initialize FastAPI app
+# Hugging Face API
+API_URL = "https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-roa"
+headers = {"Authorization": "Bearer YOUR_HUGGINGFACE_API_KEY"}  # Replace with your token
+
 app = FastAPI()
 
-# Load the MarianMT model and tokenizer
-model_name = "Helsinki-NLP/opus-mt-en-roa"
-tokenizer = MarianTokenizer.from_pretrained(model_name)
-model = MarianMTModel.from_pretrained(model_name)
-
-# Define a request schema
+# ----------------- FASTAPI SECTION --------------------
 class TranslationRequest(BaseModel):
-    src_text: List[str]
+    text: str
 
-# Define a response schema
-class TranslationResponse(BaseModel):
-    translated_text: List[str]
+@app.post("/translate")
+def translate_api(req: TranslationRequest):
+    payload = {"inputs": req.text}
+    response = requests.post(API_URL, headers=headers, json=payload)
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the MarianMT Translation API!"}
+    if response.status_code != 200:
+        return {"error": response.text}
 
-@app.post("/translate", response_model=TranslationResponse)
-def translate_text(request: TranslationRequest):
     try:
-        # Tokenize the input text
-        inputs = tokenizer(request.src_text, return_tensors="pt", padding=True)
-        # Generate translations
-        translated = model.generate(**inputs)
-        # Decode the translations
-        translated_text = [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
-        return TranslationResponse(translated_text=translated_text)
+        translated = response.json()[0]['translation_text']
+        return {"translated_text": translated}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e)}
+
+# ----------------- GRADIO SECTION ---------------------
+def translate_gradio(text):
+    if not text.strip():
+        return "Please enter some text."
+    payload = {"inputs": text}
+    response = requests.post(API_URL, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        return f"Error: {response.status_code} - {response.text}"
+
+    try:
+        return response.json()[0]['translation_text']
+    except Exception:
+        return f"Unexpected response: {response.json()}"
+
+def launch_gradio():
+    demo = gr.Interface(
+        fn=translate_gradio,
+        inputs=gr.Textbox(lines=4, placeholder="Enter English text..."),
+        outputs="text",
+        title="English to Romance Language Translator",
+        description="Translates English to Romance languages using MarianMT via Hugging Face API."
+    )
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+
+# Start Gradio in a separate thread
+threading.Thread(target=launch_gradio).start()
+
+# ----------------- ENTRY POINT ------------------------
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
